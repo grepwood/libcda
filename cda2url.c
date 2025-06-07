@@ -338,34 +338,15 @@ const char * translate_succinct_quality_to_resolutional_quality(const char * squ
 	static const char * all_known_rqualities[8] = {"144p", "240p", "360p", "480p", "720p", "1080p", "2K",  "4K"};
 	static const char * all_known_squalities[8] = {"144p", "240p", "vl",   "lq",   "sd",   "hd",    "qhd", "uhd"};
 	static const size_t ak_limit = 8;
-	size_t counter = 0;
 	const char * result = NULL;
-	int comparison = -1;
-	for(; counter < ak_limit; ++counter) {
-		comparison = strcmp(squality, all_known_squalities[counter]);
-		if(comparison == 0) {
-			result = all_known_rqualities[counter];
-			break;
-		}
-	}
-	return result;
-}
-
-/*
-const char * translate_succinct_quality_to_resolutional_quality(const char * squality) {
-	static const char * all_known_rqualities[8] = {"144p", "240p", "360p", "480p", "720p", "1080p", "2K",  "4K"};
-	static const char * all_known_squalities[8] = {"144p", "240p", "vl",   "lq",   "sd",   "hd",    "qhd", "uhd"};
-	static const size_t ak_limit = 8;
-	const char * result;
 	size_t counter = 0;
-	ssize_t keep_going = 1;
-	while(counter < ak_limit && keep_going) {
-		keep_going = !strcmp(squality, all_known_squalities[counter]);
-		result = (const char *)(((ssize_t)NULL & -keep_going) | ((ssize_t)all_known_rqualities[counter++] & ~(-keep_going)));
+	size_t comparison = 0;
+	while(counter < ak_limit && !comparison) {
+		comparison = (strcmp(squality, all_known_squalities[counter]) == 0);
+		result = (const char *)(((size_t)all_known_rqualities[counter++] & -comparison)|((size_t)result & ~(-comparison)));
 	}
 	return result;
 }
-*/
 
 static const char * get_current_quality(struct json_object * video) {
 	struct json_object * quality = NULL;
