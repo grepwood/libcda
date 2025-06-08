@@ -146,16 +146,27 @@ static char * get_video_id(const char * full_url) {
 
 static xmlChar * generate_xpath_query(const char * video_id) {
 	static const char beginning[23] = "//div[@id='mediaplayer";
+	static const size_t beginning_length = 22;
 	static const char ending[3] = "']";
+	static const size_t ending_length = 2;
+
+	xmlChar * terminate_this;
+	xmlChar terminator_prison[1];
+
 	const size_t video_id_length = strlen(video_id);
-	const size_t total_length = 22 + video_id_length + 2;
+	size_t total_length = beginning_length + video_id_length + ending_length;
+
 	xmlChar * result = malloc(total_length + 1);
-	if(result != NULL) {
-		memcpy(result, beginning, 22);
-		memcpy(result + 22, video_id, video_id_length);
-		memcpy(result + 22 + video_id_length, ending, 2);
-		result[total_length] = '\0';
-	}
+	size_t malloc_status = -(result != NULL);
+	size_t proxy_bl = (beginning_length & malloc_status)|(0 & ~malloc_status);
+	size_t proxy_el = (ending_length & malloc_status)|(0 & ~malloc_status);
+	size_t proxy_vl = (video_id_length & malloc_status)|(0 & ~malloc_status);
+
+	memcpy(result, beginning, proxy_bl);
+	memcpy(result + proxy_bl, video_id, proxy_vl);
+	memcpy(result + proxy_bl + proxy_vl, ending, proxy_el);
+	terminate_this = (xmlChar *)(((size_t)(result + total_length) & malloc_status)|((size_t)terminator_prison & ~malloc_status));
+	*terminate_this = '\0';
 	return result;
 }
 
