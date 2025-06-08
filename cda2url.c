@@ -63,6 +63,7 @@ static size_t write_memory_callback(void *contents, size_t size, size_t nmemb, v
 
 static void free_memory_chunk(struct known_size_memory_region * i) {
 	free(i->memory);
+	i->memory = NULL;
 	free(i);
 }
 
@@ -144,7 +145,7 @@ static char * get_video_id(const char * full_url) {
 	return result;
 }
 
-static xmlChar * generate_xpath_query(const char * video_id) {
+__attribute__((no_stack_protector, optimize("Os"))) static xmlChar * generate_xpath_query(const char * video_id) {
 	static const char beginning[23] = "//div[@id='mediaplayer";
 	static const size_t beginning_length = 22;
 	static const char ending[3] = "']";
@@ -261,6 +262,7 @@ static struct json_object * get_big_json(const char * page_url, const char * vid
 
 	raw_json = (char *)extract_raw_json_from_html(video_id, html_page->memory, html_page->size);
 	free_memory_chunk(html_page);
+	html_page = NULL;
 
 	if(raw_json == NULL) {
 		fprintf(stderr,"get_big_json: could not find JSON.\n");
@@ -277,7 +279,7 @@ static struct json_object * get_big_json(const char * page_url, const char * vid
 	return result;
 }
 
-static char determine_json_type(struct json_object * small_json) {
+__attribute__((no_stack_protector)) static char determine_json_type(struct json_object * small_json) {
 	struct json_object * jsonic_crosshair;
 	char result;
 	char is_m3u8;
@@ -292,13 +294,13 @@ static char determine_json_type(struct json_object * small_json) {
 	return result;
 }
 
-static struct json_object * find_small_json(struct json_object * big_json) {
+__attribute__((no_stack_protector)) struct json_object * find_small_json(struct json_object * big_json) {
+	static const char bad_message[48] = "find_small_json: JSON has no video dictionary.\n";
+	static const char good_message[1] = {0};
 	struct json_object * result = NULL;
-	int bad = !json_object_object_get_ex(big_json, "video", &result);
-	if(bad) {
-		fprintf(stderr,"find_small_json: JSON has no video dictionary.\n");
-		return NULL;
-	}
+	size_t good = -json_object_object_get_ex(big_json, "video", &result);
+	char * actual_message = (char *)(((size_t)good_message & good)|((size_t)bad_message & ~good));
+	(void)fputs(actual_message, stderr);
 	return result;
 }
 
@@ -345,16 +347,17 @@ static char ** count_qualities(struct json_object * video, size_t * count, const
 	return result;
 }
 
-const char * translate_succinct_quality_to_resolutional_quality(const char * squality) {
+static const char * translate_succinct_quality_to_resolutional_quality(const char * squality) {
 	static const char * all_known_rqualities[8] = {"144p", "240p", "360p", "480p", "720p", "1080p", "2K",  "4K"};
 	static const char * all_known_squalities[8] = {"144p", "240p", "vl",   "lq",   "sd",   "hd",    "qhd", "uhd"};
 	static const size_t ak_limit = 8;
-	const char * result = NULL;
+	char * result = NULL;
 	size_t counter = 0;
-	size_t comparison = 0;
-	while(counter < ak_limit && !comparison) {
-		comparison = (strcmp(squality, all_known_squalities[counter]) == 0);
-		result = (const char *)(((size_t)all_known_rqualities[counter++] & -comparison)|((size_t)result & ~(-comparison)));
+	size_t keep_going = 1;
+	while(keep_going) {
+		keep_going = !!strcmp(squality, all_known_squalities[counter]);
+		result = (char *)(((size_t)all_known_rqualities[counter] & -keep_going)|((size_t)result & ~(-keep_going)));
+		keep_going &= (counter++ < ak_limit);
 	}
 	return result;
 }
