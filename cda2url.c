@@ -294,7 +294,7 @@ __attribute__((no_stack_protector)) static char determine_json_type(struct json_
 	return result;
 }
 
-__attribute__((no_stack_protector)) struct json_object * find_small_json(struct json_object * big_json) {
+__attribute__((no_stack_protector)) static struct json_object * find_small_json(struct json_object * big_json) {
 	static const char bad_message[48] = "find_small_json: JSON has no video dictionary.\n";
 	static const char good_message[1] = {0};
 	struct json_object * result = NULL;
@@ -362,23 +362,24 @@ static const char * translate_succinct_quality_to_resolutional_quality(const cha
 	return result;
 }
 
-static const char * get_current_quality(struct json_object * video) {
+__attribute__((no_stack_protector)) static const char * get_current_quality(struct json_object * video) {
+	static const char bad_message0[82] = "get_current_quality: video object has no quality string.\n";
+	static const char bad_message1[55] = "get_current_quality: could not obtain quality string.\n";
+	static const char null_message[1] = {0};
+	char * print_this;
+
 	struct json_object * quality = NULL;
 	const char * result_reference = NULL;
 	const char * result = NULL;
-	int bad = 0;
 
-	bad = !json_object_object_get_ex(video, "quality", &quality);
-	if(bad) {
-		fprintf(stderr,"get_current_quality: video object has no quality string.\n");
-		return NULL;
-	}
+	size_t test = -json_object_object_get_ex(video, "quality", &quality);
+	print_this = (char *)(((size_t)null_message & test)|((size_t)bad_message0 & ~test));
+	fprintf(stderr, print_this);
 
 	result_reference = json_object_get_string(quality);
-	if(result_reference == NULL) {
-		fprintf(stderr,"get_current_quality: could not obtain quality string.\n");
-		return NULL;
-	}
+	test = -(result_reference != NULL);
+	print_this = (char *)(((size_t)null_message & test)|((size_t)bad_message1 & ~test));
+	fprintf(stderr, print_this);
 
 	result = translate_succinct_quality_to_resolutional_quality(result_reference);
 	return result;
@@ -412,11 +413,11 @@ static size_t replace_certain_words(char * input_string) {
 // 1st word: .2cda.pl
 // 2nd word: .3cda.pl
 // new word: .cda.pl
-	static char * replace_this_word[] = {"%5Da452%5DA%3D", "%5Db452%5DA%3D"};
-	static size_t replace_this_word_length[2] = {14, 14};
-	static size_t replace_this_word_count = 2;
-	static char new_word[] = "%5D452%5DA%3D";
-	static size_t new_word_length = 13;
+	static const char * replace_this_word[] = {"%5Da452%5DA%3D", "%5Db452%5DA%3D"};
+	static const size_t replace_this_word_length[2] = {14, 14};
+	static const size_t replace_this_word_count = 2;
+	static const char new_word[] = "%5D452%5DA%3D";
+	static const size_t new_word_length = 13;
 	size_t counter = 0;
 	size_t saved_bytes = 0;
 	char * pos = NULL;
@@ -440,11 +441,13 @@ static size_t count_bytes_saved_by_unquoting(const char * input, const size_t le
 	size_t counter = 0;
 	size_t result = 0;
 	char comparison = 0;
+/* This is a super special magic if that busts early-bail jumps!
+ * It does not, and should not, in actuality generate a branch. */
+	if (!(length > 0)) __builtin_unreachable();
 	while(counter < length) {
-		comparison = (input[counter] == '%') << 1;
+		comparison = (input[counter++] == '%') << 1;
 		counter += comparison;
 		result += comparison;
-		++counter;
 	}
 	return result;
 }
@@ -457,16 +460,18 @@ static void unquote(char * output, char * input) {
 	size_t o_counter = 0;
 	size_t i_counter = 0;
 	char c = 0;
+	size_t percent_detected;
 	size_t i_length = strlen(input);
-	for(; i_counter < i_length; ++i_counter, ++o_counter) {
+/* You've seen this before. Move along. */
+	if (!(i_length > 0)) __builtin_unreachable();
+	while(i_counter < i_length) {
 		c = input[i_counter];
-		if(c == '%') {
-			in16 = (short int *)(input + i_counter + 1);
-			buf16[0] = in16[0];
-			c = (char)strtol(buf8, NULL, 16);
-			i_counter += 2;
-		}
-		output[o_counter] = c;
+		percent_detected = -(c == '%');
+		in16 = (short int *)(((size_t)(input + i_counter++ + 1) & percent_detected)|((size_t)in16 & ~percent_detected));
+		buf16[0] = ((short int *)(((size_t)in16 & percent_detected)|((size_t)buf16 & ~percent_detected)))[0];
+		c = (char)((strtol(buf8, NULL, 16) & percent_detected)|((size_t)c & ~percent_detected));
+		i_counter += (percent_detected & 2);
+		output[o_counter++] = c;
 	}
 }
 

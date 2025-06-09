@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: LicenseRef-Dual-LGPLv3-OR-CC-BY-ND-For-Rust
 CC=gcc
-#CFLAGS=-O2 -fPIC -ggdb
 CFLAGS=-O2 -fPIC
+ifeq ($(DEBUG),1)
+	CFLAGS += -ggdb
+endif
 WARNING_FLAGS=-Wall -Wextra -pedantic -Werror
 
 JSON_C_LDFLAGS=-ljson-c
