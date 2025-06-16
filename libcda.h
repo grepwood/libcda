@@ -14,4 +14,5 @@ struct cda_results {
 #ifdef NOT_INCLUDED_BY_OUR_DLL
 	void free_direct_url_struct(struct cda_results * i);
 	struct cda_results * cda_url_to_direct_urls(const char * cda_page_url);
+	void cda_results2json(struct cda_results * i);
 #endif

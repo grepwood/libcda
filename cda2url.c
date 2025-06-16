@@ -213,6 +213,16 @@ static char * extract_raw_json_from_html(const char * video_id, const char * htm
 		return NULL;
 	}
 
+	if(!(xpath_result->nodesetval->nodeNr)) {
+		fputs("extract_raw_json_from_html: xmlXPathEval returned 0 results\n", stderr);
+		xmlXPathFreeObject(xpath_result);
+		xmlXPathFreeContext(context);
+		xmlFreeDoc(document);
+		xmlCleanupParser();
+		free(xpath_query);
+		return NULL;
+	}
+
 	node = xpath_result->nodesetval->nodeTab[0];
 	result_object = xmlGetProp(node, attr_name);
 	if(result_object == NULL) {
@@ -385,11 +395,11 @@ __attribute__((no_stack_protector)) static const char * get_current_quality(stru
 	return result;
 }
 
-static size_t determine_quality_index(char ** known_qualities, const size_t count, const char * quality) {
-	size_t result = 0;
-	int stop = 0;
-	while(result < count && !stop) stop = strcmp(known_qualities[result++], quality);
-	return result;
+static size_t determine_quality_index(char ** known_qualities, const size_t limit, const char * quality) {
+	size_t counter = 0;
+	char keep_going = 1;
+	while(counter < limit && keep_going) keep_going = !!strcmp(known_qualities[counter++], quality);
+	return counter;
 }
 
 static size_t remove_certain_words(char * input_string) {
@@ -441,9 +451,6 @@ static size_t count_bytes_saved_by_unquoting(const char * input, const size_t le
 	size_t counter = 0;
 	size_t result = 0;
 	char comparison = 0;
-/* This is a super special magic if that busts early-bail jumps!
- * It does not, and should not, in actuality generate a branch. */
-	if (!(length > 0)) __builtin_unreachable();
 	while(counter < length) {
 		comparison = (input[counter++] == '%') << 1;
 		counter += comparison;
@@ -462,8 +469,6 @@ static void unquote(char * output, char * input) {
 	char c = 0;
 	size_t percent_detected;
 	size_t i_length = strlen(input);
-/* You've seen this before. Move along. */
-	if (!(i_length > 0)) __builtin_unreachable();
 	while(i_counter < i_length) {
 		c = input[i_counter];
 		percent_detected = -(c == '%');
@@ -570,6 +575,112 @@ static char * get_m3u8_link(struct json_object * small_json) {
 		result[length] = 0;
 	}
 	return result;
+}
+
+void cda_results2json(struct cda_results * i) {
+	static const char * known_json_types[3] = {"none", "file", "m3u8"};
+	static const char part_0[15] = "{\"json_type\":\"";
+	static const size_t part_0l = 14;
+	static const char part_1[16] = "\",\"qualities\":[";
+	static const size_t part_1l = 15;
+	static const char part_2[11] = "],\"urls\":[";
+	static const size_t part_2l = 10;
+	static const char part_3[3] = {']','}','\0'};
+	static const size_t part_3l = 3;
+
+/* Write-only memory must be as big as biggest part_x */
+	char wom[16];
+
+	size_t * quality_lengths;
+	size_t * url_lengths;
+	size_t condition;
+	size_t the_most_important_allocation_succeeded;
+
+	const char * actual_json_type = known_json_types[(size_t)(i->json_type)];
+	const size_t actual_json_type_length = strlen(actual_json_type);
+
+	char * result;
+	char * dump_here;
+	size_t q_limit;
+	size_t u_limit;
+	size_t counter;
+
+/* Minimum length to store */
+	size_t length = part_0l + actual_json_type_length + part_1l + part_2l + part_3l;
+
+	quality_lengths = malloc(sizeof(size_t) * i->quality_count);
+	condition = -(quality_lengths != NULL);
+	q_limit = (i->quality_count & condition)|(0 & ~condition);
+	for(counter = 0; counter < q_limit; ++counter) {
+		quality_lengths[counter] = strlen(i->quality[counter]);
+		length += quality_lengths[counter];
+	}
+	length += (q_limit << 1);
+	condition = -(q_limit > 1);
+	length += ((q_limit - 1) & condition)|(0 & ~condition);
+
+	url_lengths = malloc(sizeof(size_t) * i->url_count);
+	condition = -(url_lengths != NULL);
+	u_limit = (i->url_count & condition)|(0 & ~condition);
+	for(counter = 0; counter < u_limit; ++counter) {
+		url_lengths[counter] = strlen(i->url[counter]);
+		length += url_lengths[counter];
+	}
+	length += (u_limit << 1);
+	condition = -(u_limit > 1);
+	length += ((u_limit - 1) & condition)|(0 & ~condition);
+
+/* Copy: {"json_type":"
+*/	result = malloc(length);
+	the_most_important_allocation_succeeded = -(result != NULL);
+	dump_here = (char *)(((size_t)result & the_most_important_allocation_succeeded)|((size_t)wom & ~the_most_important_allocation_succeeded));
+	memcpy(dump_here, part_0, part_0l);
+	dump_here += (part_0l & the_most_important_allocation_succeeded)|(0 & ~the_most_important_allocation_succeeded);
+
+/* Copy: json_type
+*/	memcpy(dump_here, actual_json_type, actual_json_type_length);
+	dump_here += (actual_json_type_length & the_most_important_allocation_succeeded)|(0 & ~the_most_important_allocation_succeeded);
+
+/* Copy: ","qualities":[
+*/	memcpy(dump_here, part_1, part_1l);
+	dump_here += (part_1l & the_most_important_allocation_succeeded)|(0 & ~the_most_important_allocation_succeeded);
+
+/* Copy: qualities from json
+*/	for(counter = 0; counter < q_limit; ++counter) {
+		(dump_here++)[0] = '"';
+		memcpy(dump_here, i->quality[counter], quality_lengths[counter]);
+		dump_here += quality_lengths[counter];
+		(dump_here++)[0] = '"';
+		condition = -(counter + 1 < q_limit);
+		dump_here[0] = (',' & condition)|(dump_here[0] & ~condition);
+		dump_here += !!condition;
+	}
+	free(quality_lengths);
+
+/* Copy: part_2
+*/	memcpy(dump_here, part_2, part_2l);
+	dump_here += (part_2l & the_most_important_allocation_succeeded)|(0 & ~the_most_important_allocation_succeeded);
+
+/* Copy: urls from json
+*/	for(counter = 0; counter < u_limit; ++counter) {
+		(dump_here++)[0] = '"';
+		memcpy(dump_here, i->url[counter], url_lengths[counter]);
+		dump_here += url_lengths[counter];
+		(dump_here++)[0] = '"';
+		condition = -(counter + 1 < u_limit);
+		dump_here[0] = (',' & condition)|(dump_here[0] & ~condition);
+		dump_here += !!condition;
+	}
+	free(url_lengths);
+
+/* Copy: ]}\0
+*/	memcpy(dump_here, part_3, part_3l);
+
+/* This memset will ensure, that even if result was wom all this time,
+ * no garbage will be printed. */
+	memset(wom, 0, 16);
+	puts(result);
+	free(result);
 }
 
 struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {

@@ -14,19 +14,24 @@
 
 void print_usage(const char * program_name) {
 	fprintf(stderr, "Usage: %s -u <video_url>\n", program_name);
+	fputs("Also -j gives JSON ouput\n", stderr);
 }
 
 int main(int argc, char *argv[]) {
 	struct cda_results * result = NULL;
 	size_t counter = 0;
-	char *video_url = NULL;
+	char * video_url = NULL;
+	int json_output = 0;
 	CURLcode http_engine;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "u:h")) != -1) {
+	while ((opt = getopt(argc, argv, "u:hj")) != -1) {
 		switch (opt) {
 			case 'u':
 				video_url = optarg;
+				break;
+			case 'j':
+				json_output = 1;
 				break;
 			case 'h':
 			default:
@@ -51,21 +56,25 @@ int main(int argc, char *argv[]) {
 	curl_global_cleanup();
 
 	if (result != NULL) {
-		switch(result->json_type) {
-			case LIBCDA_VIDEO_IS_FILE:
-				for(counter = 0; counter < result->url_count; ++counter) {
-					if (result->url[counter] != NULL) {
-						printf("Retrieved %s at %s\n", result->quality[counter], result->url[counter]);
+		if(json_output) {
+			cda_results2json(result);
+		} else {
+			switch(result->json_type) {
+				case LIBCDA_VIDEO_IS_FILE:
+					for(counter = 0; counter < result->url_count; ++counter) {
+						if (result->url[counter] != NULL) {
+							printf("Retrieved %s at %s\n", result->quality[counter], result->url[counter]);
+						}
 					}
-				}
-				break;
+					break;
 
-			case LIBCDA_VIDEO_IS_M3U8:
-				printf("Retrieved stream at %s\n", result->url[0]);
-				for(counter = 0; counter < result->quality_count; ++counter) {
-					printf("Stream available in: %s\n", result->quality[counter]);
-				}
-				break;
+				case LIBCDA_VIDEO_IS_M3U8:
+					printf("Retrieved stream at %s\n", result->url[0]);
+					for(counter = 0; counter < result->quality_count; ++counter) {
+						printf("Stream available in: %s\n", result->quality[counter]);
+					}
+					break;
+			}
 		}
 		free_direct_url_struct(result);
 	} else {
