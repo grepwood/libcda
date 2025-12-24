@@ -1,5 +1,4 @@
-cda2url
-cda2url-nolib
-cda2url.o
+cdatool
+cdatool-nolib
+*.o
 libcda.so
-main.o

@@ -8,7 +8,8 @@
 #include <libxml/HTMLparser.h>
 #include <json-c/json.h>
 
-#include "libcda.h"
+#include "get_url_struct.h"
+#include "get_url_signals.h"
 
 /* Compile with:
  * gcc -ljson-c -lcurl $(xml2-config --libs) $(xml2-config --cflags) -O2 -Wall -Wextra -pedantic cda2url-unoptimized.c -o cda2url
@@ -19,23 +20,27 @@ struct known_size_memory_region {
 	size_t size;
 };
 
-void free_direct_url_struct(struct cda_results * i) {
+void libcda_free_get_url(struct cda_results * i) {
 	size_t counter = 0;
 	if(i != NULL) {
 		if(i->quality != NULL) {
 			for(counter = 0; counter < i->quality_count; ++counter) {
-				if(i->quality[counter] != NULL) free(i->quality[counter]);
+				free(i->quality[counter]);
+				i->quality[counter] = NULL;
 			}
-			free(i->quality);
 		}
+		free(i->quality);
+		i->quality = NULL;
 		if(i->url != NULL) {
 			for(counter = 0; counter < i->url_count; ++counter) {
-				if(i->url[counter] != NULL) free(i->url[counter]);
+				free(i->url[counter]);
+				i->url[counter] = NULL;
 			}
-			free(i->url);
 		}
-		free(i);
+		free(i->url);
+		i->url = NULL;
 	}
+	free(i);
 }
 
 static size_t write_memory_callback(void *contents, size_t size, size_t nmemb, void *userdata) {
@@ -155,13 +160,13 @@ __attribute__((no_stack_protector, optimize("Os"))) static xmlChar * generate_xp
 	xmlChar terminator_prison[1];
 
 	const size_t video_id_length = strlen(video_id);
-	size_t total_length = beginning_length + video_id_length + ending_length;
+	const size_t total_length = beginning_length + video_id_length + ending_length;
 
 	xmlChar * result = malloc(total_length + 1);
-	size_t malloc_status = -(result != NULL);
-	size_t proxy_bl = (beginning_length & malloc_status)|(0 & ~malloc_status);
-	size_t proxy_el = (ending_length & malloc_status)|(0 & ~malloc_status);
-	size_t proxy_vl = (video_id_length & malloc_status)|(0 & ~malloc_status);
+	const size_t malloc_status = -(result != NULL);
+	const size_t proxy_bl = (beginning_length & malloc_status)|(0 & ~malloc_status);
+	const size_t proxy_el = (ending_length & malloc_status)|(0 & ~malloc_status);
+	const size_t proxy_vl = (video_id_length & malloc_status)|(0 & ~malloc_status);
 
 	memcpy(result, beginning, proxy_bl);
 	memcpy(result + proxy_bl, video_id, proxy_vl);
@@ -384,12 +389,12 @@ __attribute__((no_stack_protector)) static const char * get_current_quality(stru
 
 	size_t test = -json_object_object_get_ex(video, "quality", &quality);
 	print_this = (char *)(((size_t)null_message & test)|((size_t)bad_message0 & ~test));
-	fprintf(stderr, print_this);
+	fputs(print_this, stderr);
 
 	result_reference = json_object_get_string(quality);
 	test = -(result_reference != NULL);
 	print_this = (char *)(((size_t)null_message & test)|((size_t)bad_message1 & ~test));
-	fprintf(stderr, print_this);
+	fputs(print_this, stderr);
 
 	result = translate_succinct_quality_to_resolutional_quality(result_reference);
 	return result;
@@ -447,75 +452,125 @@ static size_t replace_certain_words(char * input_string) {
 	return saved_bytes;
 }
 
-static size_t count_bytes_saved_by_unquoting(const char * input, const size_t length) {
-	size_t counter = 0;
+static size_t unquote(char * string, const size_t length) {
+	short int prison = 0x3030;
+	char * buf8;
+	size_t read_counter = 0;
+	size_t write_counter = 0;
+	size_t percent_detected;
 	size_t result = 0;
-	char comparison = 0;
-	while(counter < length) {
-		comparison = (input[counter++] == '%') << 1;
-		counter += comparison;
-		result += comparison;
+	char c;
+	while(read_counter < length) {
+		c = string[read_counter++];
+		percent_detected = -(c == '%');
+		buf8 = (char *)(
+			(
+				(size_t)(string + read_counter) & percent_detected
+			)|(
+				(size_t)(&prison) & ~percent_detected)
+			);
+		c = (char)(
+			(
+				(size_t)(
+					(
+						buf8[0] - 48 - ((
+								(
+									7 & -(
+										buf8[0] > '@' && buf8[0] < 'G'
+									)
+								) | (
+									39 & -(
+										buf8[0] > '`' && buf8[0] < 'g'
+									)
+								)
+							) << 4
+						)
+					) | (
+						buf8[1] - 48 - (
+							(
+								7 & -(
+									buf8[1] > '@' && buf8[1] < 'G'
+								)
+							) | (
+								39 & -(
+									buf8[1] > '`' && buf8[1] < 'g'
+								)
+							)
+						)
+					)
+				) & percent_detected
+			)|(
+				(size_t)c & ~percent_detected
+			)
+		);
+		read_counter += (percent_detected & 2);
+		result += (percent_detected & 2);
+		string[write_counter++] = c;
 	}
 	return result;
 }
 
-static void unquote(char * output, char * input) {
-	static int buf32 = 0;
-	static short int * buf16 = (short int *)(&buf32);
-	static char * buf8 = (char *)(&buf32);
-	short int * in16 = NULL;
-	size_t o_counter = 0;
-	size_t i_counter = 0;
-	char c = 0;
-	size_t percent_detected;
-	size_t i_length = strlen(input);
-	while(i_counter < i_length) {
-		c = input[i_counter];
-		percent_detected = -(c == '%');
-		in16 = (short int *)(((size_t)(input + i_counter++ + 1) & percent_detected)|((size_t)in16 & ~percent_detected));
-		buf16[0] = ((short int *)(((size_t)in16 & percent_detected)|((size_t)buf16 & ~percent_detected)))[0];
-		c = (char)((strtol(buf8, NULL, 16) & percent_detected)|((size_t)c & ~percent_detected));
-		i_counter += (percent_detected & 2);
-		output[o_counter++] = c;
-	}
-}
-
-static void weird_decoding_ritual(char * inplace, const size_t length) {
-	size_t counter = 0;
-	for(; counter < length; ++counter) inplace[counter] = (33 + ((inplace[counter] + 14) % 94));
-}
+#if defined(__i386__)
+#	if defined(__AVX512F__) && defined(__AVX512BW__)
+#		include "avx512/decode_url.c"
+#	elif defined(__AVX2__)
+#		include "avx2/decode_url.c"
+#	elif defined(__SSE2__)
+#		include "sse2/decode_url.c"
+#	elif defined(__MMX__)
+#		include "mmx/decode_url.c"
+#	else
+#		include "generic/decode_url.c"
+#	endif
+#elif defined(__amd64__)
+#	if defined(__AVX512F__) && defined(__AVX512BW__)
+#		include "avx512/decode_url.c"
+#	elif defined(__AVX2__)
+#		include "avx2/decode_url.c"
+#	else
+#		include "sse2/decode_url.c"
+#	endif
+#else
+#	include "generic/decode_url.c"
+#endif
 
 static char * decode_url(const char * encoded_url, const size_t length) {
 	static char protocol[9] = "https://";
 	static char extension[5] = ".mp4";
 	char * result = NULL;
-	char * intermediate = NULL;
-	char * real_result = NULL;
+	void * intermediate = NULL;
 	size_t remove_that_many_bytes = 0;
-	size_t result_length = length;
+	size_t actionable_length = length;
+
+#if defined(LIBCDA_URL_DECODING_IS_OPTIMIZED)
+	size_t size_for_simd = (length + ALIGNMENT_MASK) & (~ALIGNMENT_MASK);
+
+	intermediate = aligned_alloc(ALIGNMENT, size_for_simd + 1);
+#else
 	intermediate = malloc(length + 1);
+#endif
+
 	memcpy(intermediate, encoded_url, length);
-	intermediate[length] = '\0';
+	((char *)intermediate)[length] = '\0';
+	
 	remove_that_many_bytes += remove_certain_words(intermediate);
 	remove_that_many_bytes += replace_certain_words(intermediate);
-	memset(intermediate + length - remove_that_many_bytes, 0, remove_that_many_bytes);
-	remove_that_many_bytes += count_bytes_saved_by_unquoting(intermediate, result_length);
-	result_length -= remove_that_many_bytes;
-	result = malloc(result_length + 1);
-	result[result_length] = '\0';
-	unquote(result, intermediate);
+	actionable_length -= remove_that_many_bytes;
+	remove_that_many_bytes += unquote(intermediate, actionable_length);
+
+	actionable_length -= remove_that_many_bytes;
+	weird_decoding_ritual(intermediate, actionable_length);
+
+	result = malloc(actionable_length + 13);
+	memcpy(result, protocol, 8);
+	memcpy(result + 8, intermediate, actionable_length);
+	memcpy(result + 8 + actionable_length, extension, 4);
+	result[actionable_length + 12] = '\0';
 	free(intermediate);
-	weird_decoding_ritual(result, result_length);
-	real_result = malloc(result_length + 13);
-	memcpy(real_result, protocol, 8);
-	memcpy(real_result + 8, result, result_length);
-	memcpy(real_result + 8 + result_length, extension, 4);
-	real_result[result_length + 12] = '\0';
-	free(result);
-	return real_result;
+	return result;
 }
 
-static char * get_url(struct json_object * video) {
+static char * get_url_from_json(struct json_object * video) {
 	struct json_object * file = NULL;
 	const char * encoded_url_ref = NULL;
 	char * result = NULL;
@@ -524,13 +579,13 @@ static char * get_url(struct json_object * video) {
 
 	bad = !json_object_object_get_ex(video, "file", &file);
 	if(bad) {
-		fprintf(stderr,"get_url: video has no file object.\n");
+		fprintf(stderr,"get_url_from_json: video has no file object.\n");
 		return result;
 	}
 
 	encoded_url_ref = json_object_get_string(file);
 	if(encoded_url_ref == NULL) {
-		fprintf(stderr,"get_url: could not obtain file string.\n");
+		fprintf(stderr,"get_url_from_json: could not obtain file string.\n");
 		return result;
 	}
 	length = strlen(encoded_url_ref);
@@ -577,7 +632,7 @@ static char * get_m3u8_link(struct json_object * small_json) {
 	return result;
 }
 
-void cda_results2json(struct cda_results * i) {
+void libcda_get_url2json(struct cda_results * i) {
 	static const char * known_json_types[3] = {"none", "file", "m3u8"};
 	static const char part_0[15] = "{\"json_type\":\"";
 	static const size_t part_0l = 14;
@@ -683,7 +738,7 @@ void cda_results2json(struct cda_results * i) {
 	free(result);
 }
 
-struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
+struct cda_results * libcda_get_url(const char * cda_page_url) {
 	const char * default_quality = NULL;
 	char * video_id = NULL;
 	char * extra_url = NULL;
@@ -715,7 +770,7 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 
 	json_type = determine_json_type(small_json);
 	if(json_type == LIBCDA_VIDEO_NOT_SUPPORTED) {
-		fprintf(stderr, "cda_url_to_direct_urls: JSON response does not contain any hints.\n");
+		fprintf(stderr, "libcda_get_url: JSON response does not contain any hints.\n");
 		free(video_id);
 		json_object_put(big_json);
 		return NULL;
@@ -723,7 +778,7 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 
 	result = malloc(sizeof(struct cda_results));
 	if(result == NULL) {
-		fprintf(stderr, "cda_url_to_direct_urls: could not allocate memory for result structure.\n");
+		fprintf(stderr, "libcda_get_url: could not allocate memory for result structure.\n");
 		free(video_id);
 		json_object_put(big_json);
 		return NULL;
@@ -746,7 +801,7 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 			result->url_count = result->quality_count;
 			result->url = malloc(result->url_count * sizeof(char *));
 			if(result->url == NULL) {
-				fprintf(stderr, "cda_url_to_direct_urls: could not allocate memory for URLs inside the result structure.\n");
+				fprintf(stderr, "libcda_get_url: could not allocate memory for URLs inside the result structure.\n");
 				free(result->quality);
 				free(video_id);
 				json_object_put(big_json);
@@ -764,14 +819,14 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 			}
 
 			default_index = determine_quality_index(result->quality, result->quality_count, default_quality);
-			result->url[default_index] = get_url(small_json);
+			result->url[default_index] = get_url_from_json(small_json);
 			json_object_put(big_json);
 
 			for(; counter < result->quality_count; ++counter) {
 				if(counter != default_index) {
 					extra_url = get_extra_url(cda_page_url, result->quality[counter]);
 					if(extra_url == NULL) {
-						fprintf(stderr, "cda_url_to_direct_urls: failed to get URL for %s.\n", result->quality[counter]);
+						fprintf(stderr, "libcda_get_url: failed to get URL for %s.\n", result->quality[counter]);
 						while(escape_counter < counter) {
 							free(result->url[escape_counter++]);
 						}
@@ -786,7 +841,7 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 					big_json = get_big_json(extra_url, video_id);
 					free(extra_url);
 					if(big_json == NULL) {
-						fprintf(stderr, "cda_url_to_direct_urls: failed to get JSON for %s.\n", result->quality[counter]);
+						fprintf(stderr, "libcda_get_url: failed to get JSON for %s.\n", result->quality[counter]);
 						while(escape_counter < counter) {
 							free(result->url[escape_counter++]);
 						}
@@ -798,9 +853,9 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 						return NULL;
 					}
 					small_json = find_small_json(big_json);
-					result->url[counter] = get_url(small_json);
+					result->url[counter] = get_url_from_json(small_json);
 					if(result->url[counter] == NULL) {
-						fprintf(stderr, "cda_url_to_direct_urls: failed to decode URL for %s.\n", result->quality[counter]);
+						fprintf(stderr, "libcda_get_url: failed to decode URL for %s.\n", result->quality[counter]);
 						while(escape_counter < counter) {
 							free(result->url[escape_counter++]);
 						}
@@ -821,7 +876,7 @@ struct cda_results * cda_url_to_direct_urls(const char * cda_page_url) {
 			result->url_count = 1;
 			result->url = malloc(sizeof(char *));
 			if(result->url == NULL) {
-				fprintf(stderr, "cda_url_to_direct_urls: failed to allocate memory for m3u8 link container.\n");
+				fprintf(stderr, "libcda_get_url: failed to allocate memory for m3u8 link container.\n");
 				for(escape_counter = 0; escape_counter < result->quality_count; ++escape_counter) {
 					free(result->quality[escape_counter]);
 				}

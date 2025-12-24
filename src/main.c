@@ -9,7 +9,6 @@
  * gcc -ljson-c -lcurl $(xml2-config --libs) $(xml2-config --cflags) -O2 -Wall -Wextra -pedantic cda2url-unoptimized.c -o cda2url
  */
 
-#define NOT_INCLUDED_BY_OUR_DLL
 #include "libcda.h"
 
 void print_usage(const char * program_name) {
@@ -52,12 +51,12 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	result = cda_url_to_direct_urls(video_url);
+	result = libcda_get_url(video_url);
 	curl_global_cleanup();
 
 	if (result != NULL) {
 		if(json_output) {
-			cda_results2json(result);
+			libcda_get_url2json(result);
 		} else {
 			switch(result->json_type) {
 				case LIBCDA_VIDEO_IS_FILE:
@@ -76,7 +75,8 @@ int main(int argc, char *argv[]) {
 					break;
 			}
 		}
-		free_direct_url_struct(result);
+		libcda_free_get_url(result);
+		result = NULL;
 	} else {
 		fprintf(stderr, "main: failed to retrieve direct URLs.\n");
 		return 1;
