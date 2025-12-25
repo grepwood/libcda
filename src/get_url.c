@@ -25,16 +25,20 @@ void libcda_free_get_url(struct cda_results * i) {
 	if(i != NULL) {
 		if(i->quality != NULL) {
 			for(counter = 0; counter < i->quality_count; ++counter) {
-				free(i->quality[counter]);
-				i->quality[counter] = NULL;
+				if(i->quality[counter] != NULL) {
+					free(i->quality[counter]);
+					i->quality[counter] = NULL;
+				}
 			}
 		}
 		free(i->quality);
 		i->quality = NULL;
 		if(i->url != NULL) {
 			for(counter = 0; counter < i->url_count; ++counter) {
-				free(i->url[counter]);
-				i->url[counter] = NULL;
+				if(i->url[counter] != NULL) {
+					free(i->url[counter]);
+					i->url[counter] = NULL;
+				}
 			}
 		}
 		free(i->url);
@@ -121,11 +125,30 @@ static struct known_size_memory_region * http_get_with_curl(const char * cda_url
 	return chunk;
 }
 
+static char ensure_last_2bytes_are_hex(const char * bytes) {
+	char result = (
+		(
+			'0' <= bytes[0] && bytes[0] <= '9'
+		)|(
+			'a' <= bytes[0] && bytes[0] <= 'f'
+		)
+	) && (
+		(
+			'0' <= bytes[1] && bytes[1] <= '9'
+		)|(
+			'a' <= bytes[1] && bytes[1] <= 'f'
+		)
+	);
+	return result;
+}
+
 static char * get_video_id(const char * full_url) {
 	const size_t full_url_length = strlen(full_url);
 	ssize_t counter = full_url_length;
 	size_t last_slash = 0;
 	size_t sublength = full_url_length;
+	size_t where_hex_lives;
+	char hex_found;
 	char * result = NULL;
 	int slash_found = 0;
 
@@ -136,17 +159,25 @@ static char * get_video_id(const char * full_url) {
 
 	if(!slash_found) {
 		fprintf(stderr, "get_video_id: no slash found.\n");
-		return NULL;
+	} else {
+		sublength -= last_slash;
+		result = malloc(sublength);
+		if(result == NULL) {
+			fprintf(stderr, "get_video_id: could not allocate memory for result.\n");
+		} else {
+			// Null termination is not needed because we copy the null terminator with memcpy
+			memcpy(result, full_url + 1 + last_slash, sublength);
+
+			where_hex_lives = sublength - 3;
+			hex_found = ensure_last_2bytes_are_hex(result + where_hex_lives);
+			if(!hex_found) {
+				fputs("get_video_id: last 2 bytes in video ID are not an 8 bit hex number\n", stderr);
+				free(result);
+				result = NULL;
+			}
+		}
 	}
 
-	sublength -= last_slash;
-	result = malloc(sublength + 1);
-	if(result == NULL) {
-		fprintf(stderr, "get_video_id: could not allocate memory for result.\n");
-		return NULL;
-	}
-	memcpy(result, full_url + 1 + last_slash, sublength);
-	result[sublength - 1] = '\0';
 	return result;
 }
 
@@ -452,59 +483,31 @@ static size_t replace_certain_words(char * input_string) {
 	return saved_bytes;
 }
 
+
+
 static size_t unquote(char * string, const size_t length) {
 	short int prison = 0x3030;
-	char * buf8;
+	char * buf;
 	size_t read_counter = 0;
 	size_t write_counter = 0;
 	size_t percent_detected;
 	size_t result = 0;
+	size_t increase;
 	char c;
 	while(read_counter < length) {
 		c = string[read_counter++];
 		percent_detected = -(c == '%');
-		buf8 = (char *)(
+		increase = percent_detected & 2;
+		buf = (char *)(
 			(
 				(size_t)(string + read_counter) & percent_detected
 			)|(
-				(size_t)(&prison) & ~percent_detected)
-			);
-		c = (char)(
-			(
-				(size_t)(
-					(
-						buf8[0] - 48 - ((
-								(
-									7 & -(
-										buf8[0] > '@' && buf8[0] < 'G'
-									)
-								) | (
-									39 & -(
-										buf8[0] > '`' && buf8[0] < 'g'
-									)
-								)
-							) << 4
-						)
-					) | (
-						buf8[1] - 48 - (
-							(
-								7 & -(
-									buf8[1] > '@' && buf8[1] < 'G'
-								)
-							) | (
-								39 & -(
-									buf8[1] > '`' && buf8[1] < 'g'
-								)
-							)
-						)
-					)
-				) & percent_detected
-			)|(
-				(size_t)c & ~percent_detected
+				(size_t)(&prison) & ~percent_detected
 			)
 		);
-		read_counter += (percent_detected & 2);
-		result += (percent_detected & 2);
+		c = (((((buf[0] & 0xF) + (buf[0] >> 6) * 9) << 4) | ((buf[1] & 0xF) + (buf[1] >> 6) * 9)) & percent_detected) | (c & ~percent_detected);
+		read_counter += increase;
+		result += increase;
 		string[write_counter++] = c;
 	}
 	return result;
@@ -542,6 +545,8 @@ static char * decode_url(const char * encoded_url, const size_t length) {
 	size_t remove_that_many_bytes = 0;
 	size_t actionable_length = length;
 
+// For debugging
+//	printf("Decoding URL[%zu]: %s\n", length, encoded_url);
 #if defined(LIBCDA_URL_DECODING_IS_OPTIMIZED)
 	size_t size_for_simd = (length + ALIGNMENT_MASK) & (~ALIGNMENT_MASK);
 
@@ -556,9 +561,10 @@ static char * decode_url(const char * encoded_url, const size_t length) {
 	remove_that_many_bytes += remove_certain_words(intermediate);
 	remove_that_many_bytes += replace_certain_words(intermediate);
 	actionable_length -= remove_that_many_bytes;
-	remove_that_many_bytes += unquote(intermediate, actionable_length);
 
-	actionable_length -= remove_that_many_bytes;
+	remove_that_many_bytes += unquote(intermediate, actionable_length);
+	actionable_length = length - remove_that_many_bytes;
+
 	weird_decoding_ritual(intermediate, actionable_length);
 
 	result = malloc(actionable_length + 13);
